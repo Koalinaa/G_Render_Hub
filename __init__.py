@@ -1,6 +1,5 @@
-
 bl_info = {
-    "name": "G_Render_Hub_BETA",
+    "name": "G Render Hub",
     "author": "Azucena Castillo",
     "version": (1, 0),
     "blender": (4, 2, 3),
@@ -15,7 +14,6 @@ bl_info = {
 import bpy
 import bmesh
 
-#this is a test for github
 # ___________________________________________________________
 # FUNCTIONS
 
@@ -100,7 +98,7 @@ def update_size_node(self, context):
     size_map = {
         'size1': "12oz" ,
         'size2': "20oz" ,
-        'size3': "28oz" ,
+        'size3': "28oz"
         }
     
     node_name = node_map.get(self.my_selects)             
@@ -170,7 +168,7 @@ def show_vertex(context):
 # PROPERTY GROUP
 
 
-#Dictionary to add selections
+# Dictionary to add selections
 class GSHADER_PG_SETTINGS(bpy.types.PropertyGroup):
     my_selects: bpy.props.EnumProperty(
         name="Selections",
@@ -221,6 +219,13 @@ class GSHADER_PG_SETTINGS(bpy.types.PropertyGroup):
         default=(1.0, 0.5, 0.0, 1.0),
         description="Pick a color",
         update=update_flavor_color
+    )
+    
+    subdivisions: bpy.props.IntProperty(
+        name="subdivisions",
+        default=10,
+        min=1,
+        max=100
     )
 
 
@@ -279,14 +284,7 @@ class GSHADER_OT_button_remove_all(bpy.types.Operator):
         self.report({'INFO'}, "Vertex removed from all selections")
         return {'FINISHED'}
     
-class GSHADER_OT_button_duplicate_vertices(bpy.types.Operator):
-    bl_idname = "gshader.button_duplicate_vertices"
-    bl_label = "DELETE DUPLICATES"
 
-    def execute(self, context):
-        bpy.ops.mesh.remove_doubles()
-        return{'FINISHED'}
-    
 class GSHADER_OT_opt_render(bpy.types.Operator):
     bl_idname = "gshader.optimize_render"
     bl_label = "Optimize Render"
@@ -316,14 +314,36 @@ class GSHADER_OT_opt_render(bpy.types.Operator):
         self.report({'INFO'}, "Render settings optimized")
         return {'FINISHED'}
                
+class GSHADER_OT_opt_new_grid(bpy.types.Operator):
+    bl_idname = "gshader.new_grid"
+    bl_label = "New Grid"
+    
+    def execute(self, context):
+        # Accedemos al valor desde las propiedades del panel
+        props = context.scene.gshader_props
+        subdivisions = props.subdivisions
+        
+        # Creamos el grid con las subdivisiones elegidas
+        bpy.ops.mesh.primitive_grid_add(
+            x_subdivisions=subdivisions - 1,
+            y_subdivisions=subdivisions - 1,
+            enter_editmode=True,
+            align='WORLD',
+            location=(0, 0, 0),
+            scale=(1, 1, 1)
+        )
+        
+        self.report({'INFO'}, "Grid created")
+        return {'FINISHED'}
 
+        
 
 # ─────────────────────────────────────────────
 # UI PANEL
 
 class GATORADE_PT_SHADER(bpy.types.Panel):
     bl_label = "G Render Hub"
-    bl_idname = "GATORADE_PT_SHADER"
+    bl_idname = "PT_SHADER"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'G Render Hub'
@@ -334,11 +354,15 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         props = scene.gshader_props
         layout_ctrl = bpy.data.objects['Turn Around Master']
         camera_zoom = bpy.data.objects['Camera'].constraints["Follow Path"]
-        
-
+    
         layout.label(text="Selection")
         layout.prop(props, "my_selects", text="")
-
+        
+        row = layout.row()
+        row.operator("gshader.new_grid", icon='MESH_GRID')
+        layout.prop(props, "subdivisions", text='Vrextez')
+        
+        
         layout.label(text="Vertex")
         row = layout.row()
         row.operator("gshader.button_add", icon='PLUS')
@@ -347,9 +371,6 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         
         row = layout.row()
         row.operator("gshader.button_remove_all", icon='PANEL_CLOSE')
-
-        row = layout.row()
-        row.operator("gshader.button_duplicate_vertices")
 
         layout.label(text="Sub Brands")
         layout.prop(props, "my_brands", text="")
@@ -384,7 +405,7 @@ classes = [
     GSHADER_OT_button_remove,
     GSHADER_OT_button_show,
     GSHADER_OT_button_remove_all,
-    GSHADER_OT_button_duplicate_vertices,
+    GSHADER_OT_opt_new_grid,
     GSHADER_OT_opt_render,
     GATORADE_PT_SHADER,
 ]
@@ -393,7 +414,6 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.gshader_props = bpy.props.PointerProperty(type=GSHADER_PG_SETTINGS)
-
 
 def unregister():
     del bpy.types.Scene.gshader_props
