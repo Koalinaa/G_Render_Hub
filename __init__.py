@@ -13,9 +13,16 @@ bl_info = {
 
 import bpy
 import bmesh
+import os
 
 # ___________________________________________________________
 # FUNCTIONS
+
+def update_active_menu(self, context):
+    # Refresca el panel cuando cambie el menú activo
+    if context.area:
+        context.area.tag_redraw()
+    print("Active menu changed:", self.active_menu)
 
 def update_flavor_color(self, context):
     nd_color_map = {
@@ -82,7 +89,6 @@ def update_size_node(self, context):
 
     if self.my_selects == "default" or self.my_size == "default":
         return
-
 
     node_map = {
         'op1': "SWITCH 001",  
@@ -227,7 +233,16 @@ class GSHADER_PG_SETTINGS(bpy.types.PropertyGroup):
         min=1,
         max=100
     )
-
+    
+    active_menu: bpy.props.EnumProperty(
+        name="active panel",
+        description="Choose to work with products or props",
+        items=[
+            ('Products', "Products", "Products"),
+            ('Props', "Props", "Props"),
+        ],
+        update=update_active_menu
+    )
 
 # ─────────────────────────────────────────────
 # OPERATORS
@@ -283,7 +298,49 @@ class GSHADER_OT_button_remove_all(bpy.types.Operator):
         bpy.ops.object.vertex_group_remove_from(use_all_groups=True)
         self.report({'INFO'}, "Vertex removed from all selections")
         return {'FINISHED'}
-    
+
+
+class GSHADER_OT_button_append(bpy.types.Operator):
+    bl_idname = "gshader.button_append"
+    bl_label = "Append to Collection"
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+    target_collection_name: bpy.props.StringProperty(default="Props")
+
+    def execute(self, context):
+        if not self.filepath:
+            self.report({'ERROR'}, "No file selected")
+            return {'CANCELLED'}
+
+        # Crear la collection destino si no existe
+        if self.target_collection_name in bpy.data.collections:
+            target_col = bpy.data.collections[self.target_collection_name]
+        else:
+            target_col = bpy.data.collections.new(self.target_collection_name)
+            context.scene.collection.children.link(target_col)
+
+        # Cargar lista de objetos del blend
+        with bpy.data.libraries.load(self.filepath, link=False) as (data_from, data_to):
+            for obj_name in data_from.objects:
+                data_to.objects = [obj_name]
+
+                # Apendea el objeto
+                for obj in data_to.objects:
+                    if obj:
+                        # Vincular a collection destino
+                        target_col.objects.link(obj)
+                        # Desvincular de la collection principal
+                        if obj.name in context.scene.collection.objects:
+                            context.scene.collection.objects.unlink(obj)
+
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+
+
 
 class GSHADER_OT_opt_render(bpy.types.Operator):
     bl_idname = "gshader.optimize_render"
@@ -336,7 +393,6 @@ class GSHADER_OT_opt_new_grid(bpy.types.Operator):
         self.report({'INFO'}, "Grid created")
         return {'FINISHED'}
 
-        
 
 # ─────────────────────────────────────────────
 # UI PANEL
@@ -353,15 +409,17 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         scene = context.scene
         props = scene.gshader_props
         layout_ctrl = bpy.data.objects['Turn Around Master']
-        camera_zoom = bpy.data.objects['Camera'].constraints["Follow Path"]
-    
-        layout.label(text="Selection")
-        layout.prop(props, "my_selects", text="")
+        camera_zoom = bpy.data.objects['Camera'].constraints["Follow Path"]  
+        
+        row = layout.row()
+        row.prop(props, "active_menu", expand= True)
         
         row = layout.row()
         row.operator("gshader.new_grid", icon='MESH_GRID')
-        layout.prop(props, "subdivisions", text='Vrextez')
+        row.prop(props, "subdivisions", text='Size')
         
+        layout.label(text="Selection")
+        layout.prop(props, "my_selects", text="")        
         
         layout.label(text="Vertex")
         row = layout.row()
@@ -372,12 +430,19 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         row = layout.row()
         row.operator("gshader.button_remove_all", icon='PANEL_CLOSE')
 
-        layout.label(text="Sub Brands")
-        layout.prop(props, "my_brands", text="")
-        layout.label(text="Size")
-        layout.prop(props, "my_size",text="")
-        layout.prop(props, "color")
-        
+        if props.active_menu == 'Products':
+            box = layout.box()
+            box.label(text="Sub Brands")
+            box.prop(props, "my_brands", text="")
+            box.label(text="Size")
+            box.prop(props, "my_size",text="")
+            box.prop(props, "color")
+            
+        elif props.active_menu == 'Props':
+            box = layout.box()
+            box.operator("gshader.button_append", text="Import New Asset", icon='APPEND_BLEND')
+            
+            
         layout.label(text="Layout")
         layout.prop(layout_ctrl, "rotation_euler", text="Turn Around", index=2)
         layout.prop(camera_zoom, "offset", text="Camera Zoom")
@@ -406,6 +471,7 @@ classes = [
     GSHADER_OT_button_show,
     GSHADER_OT_button_remove_all,
     GSHADER_OT_opt_new_grid,
+    GSHADER_OT_button_append,
     GSHADER_OT_opt_render,
     GATORADE_PT_SHADER,
 ]
