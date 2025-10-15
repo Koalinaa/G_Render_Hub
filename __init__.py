@@ -19,10 +19,35 @@ import os
 # FUNCTIONS
 
 def update_active_menu(self, context):
-    # Refresca el panel cuando cambie el menú activo
+    props_mesh = bpy.data.objects.get('GeoNodes Products')
+    products_mesh = bpy.data.objects.get('GeoNodes')
+
     if context.area:
         context.area.tag_redraw()
-    print("Active menu changed:", self.active_menu)
+
+    # Determina qué mesh activar
+    target_mesh = None
+    if self.active_menu == 'Props':
+        target_mesh = props_mesh
+    elif self.active_menu == 'Products':
+        target_mesh = products_mesh
+
+    if not target_mesh:
+        print("Objeto objetivo no encontrado")
+        return
+
+    # Cambiar a modo objeto antes de manipular selección
+    if bpy.context.object.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Deseleccionar todo y activar el target
+    bpy.ops.object.select_all(action='DESELECT')
+    target_mesh.select_set(True)
+    bpy.context.view_layer.objects.active = target_mesh
+
+    # Entrar a modo edición
+    bpy.ops.object.mode_set(mode='EDIT')
+
 
 def update_flavor_color(self, context):
     nd_color_map = {
@@ -292,54 +317,51 @@ class GSHADER_OT_button_show(bpy.types.Operator):
     
 class GSHADER_OT_button_remove_all(bpy.types.Operator):
     bl_idname = "gshader.button_remove_all"
-    bl_label = "REMOVE ALL"
+    bl_label = "REMOVE FROM ALL"
     
     def execute(self, context):
         bpy.ops.object.vertex_group_remove_from(use_all_groups=True)
         self.report({'INFO'}, "Vertex removed from all selections")
         return {'FINISHED'}
-
+    
+class GSHADER_OT_button_delete_duplicates(bpy.types.Operator):
+    bl_idname = "gshader.button_delete_duplicates"
+    bl_label = "CLEAN DUPLICATES"
+    
+    def execute(self, context):
+        bpy.ops.mesh.remove_doubles()
+        self.report({'INFO'})
+        return {'FINISHED'}
+        
 
 class GSHADER_OT_button_append(bpy.types.Operator):
     bl_idname = "gshader.button_append"
     bl_label = "Append to Collection"
-
+    
+    #Propiedad donde Blender guardará la ruta seleccionada
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
-    target_collection_name: bpy.props.StringProperty(default="Props")
 
-    def execute(self, context):
-        if not self.filepath:
-            self.report({'ERROR'}, "No file selected")
-            return {'CANCELLED'}
-
-        # Crear la collection destino si no existe
-        if self.target_collection_name in bpy.data.collections:
-            target_col = bpy.data.collections[self.target_collection_name]
-        else:
-            target_col = bpy.data.collections.new(self.target_collection_name)
-            context.scene.collection.children.link(target_col)
-
-        # Cargar lista de objetos del blend
-        with bpy.data.libraries.load(self.filepath, link=False) as (data_from, data_to):
-            for obj_name in data_from.objects:
-                data_to.objects = [obj_name]
-
-                # Apendea el objeto
-                for obj in data_to.objects:
-                    if obj:
-                        # Vincular a collection destino
-                        target_col.objects.link(obj)
-                        # Desvincular de la collection principal
-                        if obj.name in context.scene.collection.objects:
-                            context.scene.collection.objects.unlink(obj)
-
-        return {'FINISHED'}
+    # (Opcional) filtro del file browser: sólo mostrar .obj
+    filter_glob: bpy.props.StringProperty(
+        default="*.fbx",
+        options={'HIDDEN'}
+    )
 
     def invoke(self, context, event):
+        # Abre el selector de archivos
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
+    def execute(self, context):
+        if not self.filepath:
+            self.report({'ERROR'}, "No se seleccionó ningún archivo")
+            return {'CANCELLED'}
 
+        # Importa el archivo .obj seleccionado
+        bpy.ops.import_scene.fbx(filepath=self.filepath)
+
+        self.report({'INFO'}, f"Archivo importado: {self.filepath}")
+        return {'FINISHED'}
 
 
 class GSHADER_OT_opt_render(bpy.types.Operator):
@@ -381,7 +403,7 @@ class GSHADER_OT_opt_new_grid(bpy.types.Operator):
         subdivisions = props.subdivisions
         
         # Creamos el grid con las subdivisiones elegidas
-        bpy.ops.mesh.primitive_grid_add(
+        bpy.ops.mesh.primitive_grid_add(  
             x_subdivisions=subdivisions - 1,
             y_subdivisions=subdivisions - 1,
             enter_editmode=True,
@@ -393,6 +415,11 @@ class GSHADER_OT_opt_new_grid(bpy.types.Operator):
         self.report({'INFO'}, "Grid created")
         return {'FINISHED'}
 
+#class GSHADER_OT_button_delete_duplicates(bpy.types.Operator):
+#    bl_idname = ""
+#    bl_label = ""
+
+#    def execute(self, context):
 
 # ─────────────────────────────────────────────
 # UI PANEL
@@ -429,6 +456,8 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         
         row = layout.row()
         row.operator("gshader.button_remove_all", icon='PANEL_CLOSE')
+        row = layout.row()
+        row.operator("gshader.button_delete_duplicates")
 
         if props.active_menu == 'Products':
             box = layout.box()
@@ -449,7 +478,7 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         
         layout.label(text="Render")
         row = layout.row()
-        row.operator("RenderSettings.filepath")
+#        row.operator("RenderSettings.filepath")
         
         row = layout.row()
         row.operator("view3d.view_camera", text="Camera Preview", icon='VIEW_CAMERA')
@@ -474,6 +503,7 @@ classes = [
     GSHADER_OT_button_append,
     GSHADER_OT_opt_render,
     GATORADE_PT_SHADER,
+    GSHADER_OT_button_delete_duplicates,
 ]
 
 def register():
