@@ -14,7 +14,7 @@ bl_info = {
 import bpy
 import bmesh
 import os
-
+from bl_ui.generic_ui_list import draw_ui_list
 # ___________________________________________________________
 # FUNCTIONS
 
@@ -268,13 +268,17 @@ class GSHADER_PG_SETTINGS(bpy.types.PropertyGroup):
         ],
         update=update_active_menu
     )
+    
+    name: bpy.props.StringProperty("wow")
+    
+
 
 # ─────────────────────────────────────────────
 # OPERATORS
 
 class GSHADER_OT_button_add(bpy.types.Operator):
     bl_idname = "gshader.button_add"
-    bl_label = "ADD"
+    bl_label = "Add to"
 
     def execute(self, context):
         obj = context.object
@@ -298,7 +302,7 @@ class GSHADER_OT_button_add(bpy.types.Operator):
 
 class GSHADER_OT_button_remove(bpy.types.Operator):
     bl_idname = "gshader.button_remove"
-    bl_label = "REMOVE"
+    bl_label = "Remove from"
 
     def execute(self, context):
         bpy.ops.object.vertex_group_remove_from()
@@ -308,7 +312,7 @@ class GSHADER_OT_button_remove(bpy.types.Operator):
 
 class GSHADER_OT_button_show(bpy.types.Operator):
     bl_idname = "gshader.button_select"
-    bl_label = "SHOW"
+    bl_label = "Show vertex"
 
     def execute(self, context):
         show_vertex(context)
@@ -317,7 +321,7 @@ class GSHADER_OT_button_show(bpy.types.Operator):
     
 class GSHADER_OT_button_remove_all(bpy.types.Operator):
     bl_idname = "gshader.button_remove_all"
-    bl_label = "REMOVE FROM ALL"
+    bl_label = "Remove from all groups"
     
     def execute(self, context):
         bpy.ops.object.vertex_group_remove_from(use_all_groups=True)
@@ -326,29 +330,25 @@ class GSHADER_OT_button_remove_all(bpy.types.Operator):
     
 class GSHADER_OT_button_delete_duplicates(bpy.types.Operator):
     bl_idname = "gshader.button_delete_duplicates"
-    bl_label = "CLEAN DUPLICATES"
+    bl_label = "Clean doubles"
     
     def execute(self, context):
-        bpy.ops.mesh.remove_doubles()
-        self.report({'INFO'})
+        bpy.ops.mesh.remove_doubles(threshold=0.01)
         return {'FINISHED'}
         
 
+
 class GSHADER_OT_button_append(bpy.types.Operator):
     bl_idname = "gshader.button_append"
-    bl_label = "Append to Collection"
+    bl_label = "Import and Create Collection"
     
-    #Propiedad donde Blender guardará la ruta seleccionada
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
-
-    # (Opcional) filtro del file browser: sólo mostrar .obj
     filter_glob: bpy.props.StringProperty(
-        default="*.fbx",
+        default="*.fbx;*.obj",
         options={'HIDDEN'}
     )
 
     def invoke(self, context, event):
-        # Abre el selector de archivos
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
@@ -357,10 +357,44 @@ class GSHADER_OT_button_append(bpy.types.Operator):
             self.report({'ERROR'}, "No se seleccionó ningún archivo")
             return {'CANCELLED'}
 
-        # Importa el archivo .obj seleccionado
-        bpy.ops.import_scene.fbx(filepath=self.filepath)
+        filepath = self.filepath
+        filename = os.path.basename(filepath)
+        default_name = os.path.splitext(filename)[0]
 
-        self.report({'INFO'}, f"Archivo importado: {self.filepath}")
+        # Usa el nombre que el usuario escribió o el del archivo
+        collection_name = default_name
+
+        # Guarda la lista de objetos antes de importar
+        before = set(bpy.data.objects)
+
+        # --- Importar ---
+        if filepath.lower().endswith(".fbx"):
+            bpy.ops.import_scene.fbx(filepath=filepath)
+        elif filepath.lower().endswith(".obj"):
+            bpy.ops.wm.obj_import(filepath=filepath)
+        else:
+            self.report({'ERROR'}, "Formato no compatible. Usa .fbx o .obj")
+            return {'CANCELLED'}
+
+        # Detectar los objetos nuevos
+        after = set(bpy.data.objects)
+        imported_objs = list(after - before)
+
+        if not imported_objs:
+            self.report({'WARNING'}, "No se detectaron objetos nuevos.")
+            return {'FINISHED'}
+
+        # Crear colección con el nombre elegido
+        new_coll = bpy.data.collections.new(collection_name)
+        bpy.data.collections['Props'].children.link(new_coll)
+
+        # Mover objetos a esa colección
+        for obj in imported_objs:
+            for coll in obj.users_collection:
+                coll.objects.unlink(obj)
+            new_coll.objects.link(obj)
+
+        self.report({'INFO'}, "Importado a colección: {new_coll.name}")
         return {'FINISHED'}
 
 
@@ -415,11 +449,13 @@ class GSHADER_OT_opt_new_grid(bpy.types.Operator):
         self.report({'INFO'}, "Grid created")
         return {'FINISHED'}
 
-#class GSHADER_OT_button_delete_duplicates(bpy.types.Operator):
-#    bl_idname = ""
-#    bl_label = ""
+class GSHADER_OT_button_duplicate(bpy.types.Operator):
+    bl_idname = "gshader.duplicate_vertices"
+    bl_label = "Duplicate selected vertices"
 
-#    def execute(self, context):
+    def execute(self, context):
+            bpy.ops.mesh.duplicate_move(MESH_OT_duplicate={"mode":1}, TRANSFORM_OT_translate={"value":(0.0, 0.0, 0.15)})
+            return{'FINISHED'}
 
 # ─────────────────────────────────────────────
 # UI PANEL
@@ -440,15 +476,19 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         
         row = layout.row()
         row.prop(props, "active_menu", expand= True)
-        
+
         row = layout.row()
         row.operator("gshader.new_grid", icon='MESH_GRID')
         row.prop(props, "subdivisions", text='Size')
         
+        col = layout.column()
+        col.operator("gshader.duplicate_vertices")
+        col.operator("gshader.button_delete_duplicates")
+        
         layout.label(text="Selection")
         layout.prop(props, "my_selects", text="")        
         
-        layout.label(text="Vertex")
+        layout.label(text="Vertex assign")
         row = layout.row()
         row.operator("gshader.button_add", icon='PLUS')
         row.operator("gshader.button_remove", icon='CANCEL')
@@ -456,8 +496,6 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         
         row = layout.row()
         row.operator("gshader.button_remove_all", icon='PANEL_CLOSE')
-        row = layout.row()
-        row.operator("gshader.button_delete_duplicates")
 
         if props.active_menu == 'Products':
             box = layout.box()
@@ -470,8 +508,16 @@ class GATORADE_PT_SHADER(bpy.types.Panel):
         elif props.active_menu == 'Props':
             box = layout.box()
             box.operator("gshader.button_append", text="Import New Asset", icon='APPEND_BLEND')
+            # Lista de props agregados
+            draw_ui_list(
+            layout,
+            context,
+            list_path="scene.my_list",
+            active_index_path="scene.my_list_active_index",
+            unique_id="my_list_id",
+            )
             
-            
+        
         layout.label(text="Layout")
         layout.prop(layout_ctrl, "rotation_euler", text="Turn Around", index=2)
         layout.prop(camera_zoom, "offset", text="Camera Zoom")
@@ -504,17 +550,23 @@ classes = [
     GSHADER_OT_opt_render,
     GATORADE_PT_SHADER,
     GSHADER_OT_button_delete_duplicates,
+    GSHADER_OT_button_duplicate,
 ]
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.gshader_props = bpy.props.PointerProperty(type=GSHADER_PG_SETTINGS)
-
+    bpy.types.Scene.my_list = bpy.props.CollectionProperty(type=GSHADER_PG_SETTINGS)
+    bpy.types.Scene.my_list_active_index = bpy.props.IntProperty()
+    
+    
 def unregister():
     del bpy.types.Scene.gshader_props
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
+    del bpy.types.Scene.my_list
+    del bpy.types.Scene.my_list_active_index
 
 
 if __name__ == "__main__":
